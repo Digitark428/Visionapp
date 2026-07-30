@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#F1ECE2">
 <title>Orbite — y voir plus clair</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ============================================================
+   À REMPLIR — Supabase → Project Settings → Data API
+   Ces deux valeurs sont publiques par conception : la sécurité
+   est assurée côté base par les politiques RLS de schema.sql.
+   ============================================================ */
+window.ORBITE_CONFIG = {
+  url:     '',   // ex. https://abcdefgh.supabase.co
+  anonKey: ''    // clé « anon public »
+};
+</script>
 <style>
 /* ============================================================
    ORBITE · V2 — espace de concentration
@@ -294,6 +306,18 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
 .act:active{transform:scale(.985)}
 .act.done{background:var(--focus-w);color:#5F7A58;border:1px solid rgba(126,154,118,.3)}
 .act.del{background:rgba(51,55,47,.04);color:#BE8B6C;flex:0 0 auto;padding:15px 20px}
+.act.add{background:var(--focus);color:#fff;box-shadow:0 6px 18px rgba(126,154,118,.26)}
+.act.ghost{background:rgba(51,55,47,.04);color:var(--ink-soft)}
+.sheet-actions{margin-top:10px}
+#actNew .sheet-actions:first-child,#actEdit .sheet-actions:first-child{margin-top:24px}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translate(-50%,10px);
+  z-index:90;padding:10px 18px;border-radius:999px;font-size:13px;color:var(--ink);
+  background:rgba(255,255,255,.85);border:1px solid var(--line);box-shadow:0 6px 22px rgba(51,55,47,.12);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  opacity:0;pointer-events:none;transition:opacity .4s var(--ease),transform .5s var(--slow)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#cfgWarn{margin:0 0 18px;padding:12px 15px;border-radius:14px;font-size:12.5px;line-height:1.5;
+  background:rgba(224,162,120,.14);border:1px solid rgba(224,162,120,.35);color:#8A5F3E}
 
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.2s!important}
@@ -329,13 +353,13 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
       <ellipse cx="48" cy="48" rx="34" ry="20" stroke="#B9C4B0" stroke-width="2"/>
       <circle cx="48" cy="48" r="8" fill="#7E9A76"/><circle cx="82" cy="48" r="4" fill="#E0A278"/>
     </svg>
+    <div id="cfgWarn" hidden></div>
     <h1 class="auth-title" id="authTitle">Content de te revoir</h1>
     <p class="auth-sub" id="authSub">Ton espace t'attend, exactement où tu l'as laissé.</p>
     <div class="field" id="fName" hidden><label for="iName">Prénom</label><input id="iName" type="text" autocomplete="given-name" placeholder="Kevin"></div>
     <div class="field"><label for="iMail">Adresse e-mail</label><input id="iMail" type="email" autocomplete="email" placeholder="toi@exemple.fr"></div>
     <div class="field"><label for="iPass">Mot de passe</label><input id="iPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <button class="btn" id="doAuth">Se connecter</button>
-    <button class="btn ghost" id="skipAuth">Entrer en mode démo</button>
     <p class="note" id="authNote"></p>
     <button class="link" id="swapAuth">Pas encore de compte&nbsp;? <b>En créer un</b></button>
   </div>
@@ -380,6 +404,8 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
   </div>
 </section>
 
+<div id="toast"></div>
+
 <!-- OVERLAY LISTES -->
 <div class="panel" id="listPanel">
   <div class="veil"></div>
@@ -421,9 +447,19 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
     <div class="blk"><h4>Checklist</h4><div id="sList"></div>
       <div class="chk"><div class="box" style="opacity:.4"></div><input id="sNew" type="text" placeholder="Ajouter une étape"></div>
     </div>
-    <div class="sheet-actions">
-      <button class="act done" id="sDone">Marquer comme terminée</button>
-      <button class="act del" id="sDel">Supprimer</button>
+    <p class="note" id="sNote2"></p>
+
+    <div id="actNew" hidden>
+      <div class="sheet-actions"><button class="act add" id="sAdd">Ajouter la tâche</button></div>
+      <div class="sheet-actions"><button class="act ghost" id="sCancel">Annuler</button></div>
+    </div>
+
+    <div id="actEdit">
+      <div class="sheet-actions"><button class="act add" id="sSave">Enregistrer</button></div>
+      <div class="sheet-actions">
+        <button class="act done" id="sDone">Marquer comme terminée</button>
+        <button class="act del" id="sDel">Supprimer</button>
+      </div>
     </div>
   </div>
 </div>
@@ -432,35 +468,78 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
 (function(){
 'use strict';
 
-/* ===== stockage tolérant ===== */
-const mem={};
-const hasWS=typeof window.storage==='object'&&window.storage&&typeof window.storage.get==='function';
-const store={
-  async get(k){
-    const run=(async()=>{
-      if(hasWS){try{const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}catch(e){return null;}}
-      try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}
-    })();
-    const val=await Promise.race([run,new Promise(r=>setTimeout(()=>r(null),700))]);
-    return (val==null)?(mem[k]??null):val;
-  },
-  set(k,v){mem[k]=v;
-    if(hasWS){try{Promise.resolve(window.storage.set(k,JSON.stringify(v))).catch(()=>{});}catch(e){}}
-    try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
-};
-const key=s=>'orbite_'+s.replace(/[^a-z0-9]/gi,'_').toLowerCase();
-const veil=s=>{let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return 'v'+h.toString(36);};
+/* ===== base de données (Supabase) ===== */
+const CFG=window.ORBITE_CONFIG||{};
+const configured=!!(CFG.url&&CFG.anonKey&&/^https?:\/\//.test(CFG.url));
+let sb=null;
+try{ if(configured&&window.supabase) sb=window.supabase.createClient(CFG.url,CFG.anonKey); }catch(e){ sb=null; }
 
 /* ===== état ===== */
-const S={user:null,tasks:[],active:0,open:null,creating:false,listType:'all'};
+const S={user:null,tasks:[],active:0,open:null,listType:'all'};
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const MAX_FOCUS=4;
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let booted=false;
 
-function show(id){$$('.screen').forEach(s=>s.classList.toggle('on',s.id===id));}
+function newId(){
+  try{ return crypto.randomUUID(); }catch(e){}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);});
+}
+function show(id){$$('.screen').forEach(x=>x.classList.toggle('on',x.id===id));}
+
+let toastT;
+function toast(m){const el=$('#toast');el.textContent=m;el.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),2400);}
+
+/* ---- cache local : l'app reste utilisable sans réseau ---- */
+const ck=id=>'orbite_cache_'+id;
+function cacheGet(id){try{const v=localStorage.getItem(ck(id));return v?JSON.parse(v):null;}catch(e){return null;}}
+function cacheSet(id,t){try{localStorage.setItem(ck(id),JSON.stringify(t));}catch(e){}}
+
+/* ---- correspondance ligne <-> tâche ---- */
+const rowOf=t=>({id:t.id,user_id:S.user.id,title:t.title||'',note:t.note||'',descr:t.desc||'',
+  due_date:t.date||null,due_time:t.time||null,remind:!!t.remind,
+  checklist:Array.isArray(t.list)?t.list:[],category:t.cat||'',
+  level:t.level,done:!!t.done,touched:new Date(t.touched||Date.now()).toISOString()});
+const taskOf=r=>({id:r.id,title:r.title||'',note:r.note||'',desc:r.descr||'',
+  date:r.due_date||'',time:(r.due_time||'').slice(0,5),remind:!!r.remind,
+  list:Array.isArray(r.checklist)?r.checklist:[],cat:r.category||'',
+  level:(r.level==null?1:r.level),done:!!r.done,touched:new Date(r.touched||Date.now()).getTime()});
+
+/* ---- enregistrement : cache immédiat, base juste après ---- */
+let saveT=null,saving=false;
+function save(){
+  if(S.user)cacheSet(S.user.id,S.tasks.filter(t=>!t.pending));
+  if(!sb||!S.user)return;
+  clearTimeout(saveT);saveT=setTimeout(pushAll,700);
+}
+async function pushAll(){
+  if(!sb||!S.user||saving)return;
+  const rows=S.tasks.filter(t=>!t.pending).map(rowOf);
+  if(!rows.length)return;
+  saving=true;
+  try{const {error}=await sb.from('tasks').upsert(rows,{onConflict:'id'});if(error)throw error;}
+  catch(e){toast('Hors ligne \u2014 gardé sur l\u2019appareil');}
+  saving=false;
+}
+async function removeRemote(id){
+  if(!sb||!S.user)return;
+  try{await sb.from('tasks').delete().eq('id',id);}catch(e){}
+}
+async function fetchTasks(){
+  if(!sb||!S.user)return;
+  try{
+    const {data,error}=await sb.from('tasks').select('*').order('touched',{ascending:false});
+    if(error)throw error;
+    const pend=S.tasks.filter(t=>t.pending);
+    S.tasks=(data||[]).map(taskOf).concat(pend);
+    cacheSet(S.user.id,S.tasks.filter(t=>!t.pending));
+    if(booted)sync();
+  }catch(e){toast('Base injoignable \u2014 mode local');}
+}
 
 /* ===== connexion ===== */
 let mode='in';
@@ -468,50 +547,57 @@ const fName=$('#fName'),iName=$('#iName'),iMail=$('#iMail'),iPass=$('#iPass');
 const authTitle=$('#authTitle'),authSub=$('#authSub'),doAuth=$('#doAuth'),swapAuth=$('#swapAuth'),authNote=$('#authNote');
 function setMode(m){mode=m;const up=m==='up';fName.hidden=!up;
   authTitle.textContent=up?'Un espace, rien qu\u2019à toi':'Content de te revoir';
-  authSub.textContent=up?'Quelques secondes, puis on respire.':'Ton espace t\u2019attend, exactement où tu l\u2019as laissé.';
+  authSub.textContent=up?'Ton e-mail, un mot de passe, et c\u2019est ouvert.':'Ton espace t\u2019attend, exactement où tu l\u2019as laissé.';
   doAuth.textContent=up?'Créer mon espace':'Se connecter';
   swapAuth.innerHTML=up?'Déjà un espace&nbsp;? <b>Se connecter</b>':'Pas encore de compte&nbsp;? <b>En créer un</b>';
   iPass.setAttribute('autocomplete',up?'new-password':'current-password');say('');}
 function say(t){authNote.textContent=t;authNote.classList.toggle('on',!!t);}
 swapAuth.onclick=()=>setMode(mode==='in'?'up':'in');
+
+function humanErr(e){
+  const m=String((e&&e.message)||e||'').toLowerCase();
+  if(m.includes('invalid login'))return 'E-mail ou mot de passe incorrect.';
+  if(m.includes('already registered')||m.includes('already been registered'))return 'Un espace existe déjà avec cette adresse.';
+  if(m.includes('not confirmed'))return 'Adresse non confirmée : ouvre le lien reçu par e-mail.';
+  if(m.includes('password'))return 'Mot de passe trop court (6 caractères minimum).';
+  if(m.includes('rate limit'))return 'Trop de tentatives, patiente une minute.';
+  if(m.includes('fetch')||m.includes('network'))return 'Pas de connexion à la base.';
+  return 'Connexion impossible. Réessaie dans un instant.';
+}
+
 doAuth.onclick=async()=>{
+  if(!sb)return say('La base n\u2019est pas configurée (bloc ORBITE_CONFIG).');
   const mail=iMail.value.trim().toLowerCase(),pass=iPass.value,name=iName.value.trim();
   if(!/^\S+@\S+\.\S+$/.test(mail))return say('Cette adresse e-mail semble incomplète.');
-  if(pass.length<4)return say('Le mot de passe fait au moins 4 caractères.');
+  if(pass.length<6)return say('Le mot de passe fait au moins 6 caractères.');
   if(mode==='up'&&!name)return say('Indique ton prénom, il servira à te dire bonjour.');
-  const k=key('user_'+mail),found=await store.get(k);
-  if(mode==='up'){if(found)return say('Un espace existe déjà avec cette adresse.');
-    const u={mail,name,pass:veil(pass)};store.set(k,u);store.set(key('tasks_'+mail),seed());enter(u);}
-  else{if(!found){const u={mail,name:name||mail.split('@')[0],pass:veil(pass)};store.set(k,u);store.set(key('tasks_'+mail),seed());return enter(u);}
-    if(found.pass!==veil(pass))return say('Mot de passe incorrect.');enter(found);}
+  const label=doAuth.textContent;doAuth.textContent='Un instant\u2026';doAuth.style.opacity=.7;say('');
+  try{
+    if(mode==='up'){
+      const {data,error}=await sb.auth.signUp({email:mail,password:pass,options:{data:{name}}});
+      if(error)throw error;
+      if(!data.session){setMode('in');return say('Espace créé. Ouvre le lien reçu par e-mail, puis connecte-toi.');}
+      await enter(data.user);
+    }else{
+      const {data,error}=await sb.auth.signInWithPassword({email:mail,password:pass});
+      if(error)throw error;
+      await enter(data.user);
+    }
+  }catch(e){say(humanErr(e));}
+  finally{doAuth.textContent=label;doAuth.style.opacity='';}
 };
-$('#skipAuth').onclick=()=>{const u={mail:'demo@orbite.app',name:'Kevin',pass:veil('demo')};
-  S.user=u;S.tasks=seed();store.set(key('user_'+u.mail),u);store.set(key('tasks_'+u.mail),S.tasks);store.set(key('session'),u.mail);
-  greet(u);show('intro');setTimeout(()=>{show('app');boot();},4300);};
 [iMail,iPass,iName].forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')doAuth.click();}));
-function greet(u){$('#hello').textContent='Bonjour '+u.name+' \u2600\ufe0f';}
-async function enter(u){S.user=u;S.tasks=(await store.get(key('tasks_'+u.mail)))||seed();
-  store.set(key('session'),u.mail);greet(u);show('intro');setTimeout(()=>{show('app');boot();},4300);}
-function signOut(){store.set(key('session'),null);location.reload();}
-const save=(()=>{let t;return()=>{clearTimeout(t);t=setTimeout(()=>{if(S.user)store.set(key('tasks_'+S.user.mail),S.tasks);},220);};})();
 
-/* ===== données de départ ===== */
-function seed(){
-  const t=(title,note,level,x={})=>Object.assign({id:uid(),title,note,desc:'',date:'',time:'',remind:false,list:[],cat:'',level,done:false,touched:Date.now()-Math.random()*1e5},x);
-  return [
-    t('Tourner la vidéo','Préparer le drone et appeler le client.',0,{cat:'Travail',list:[{txt:'Vérifier le drone',done:true},{txt:'Charger les batteries',done:true},{txt:'Appeler le client',done:false}]}),
-    t('Séance sport','Cross-training puis mobilité épaules.',0),
-    t('Appeler Julien','Point sur le projet Terre de Beach.',0),
-    t('Finaliser le devis','Vidéo Booth 360 pour samedi.',0,{cat:'Travail'}),
-    t('Préparer la présentation','',1),t('Lire 20 pages','',1),t('Répondre aux e-mails','',1),
-    t('Monter la vidéo courte','',1),t('Publier le post Instagram','',1),
-    t('Idée de collection textile','Lin naturel, tons sable.',1,{cat:'Idée'}),
-    t('Réserver l\u2019hébergement','',1),t('Méditer 10 minutes','',1),
-    t('Apprendre à surfer','',2),t('Écrire un livre','',2),t('Road trip à Madagascar','',2),
-    t('Refaire le site internet','',2),t('Projet appli mobile','',2),t('Nouvelle collection','',2),
-    t('Planifier le voyage','',2),t('Projet immobilier','',2)
-  ];
+function greet(u){$('#hello').textContent='Bonjour '+u.name+' \u2600\ufe0f';}
+async function enter(u){
+  S.user={id:u.id,email:u.email,name:(u.user_metadata&&u.user_metadata.name)||String(u.email||'').split('@')[0]};
+  greet(S.user);
+  S.tasks=cacheGet(S.user.id)||[];
+  show('intro');
+  setTimeout(()=>{show('app');boot();},4300);
+  fetchTasks();
 }
+async function signOut(){try{if(sb)await sb.auth.signOut();}catch(e){}location.reload();}
 
 /* ===== en-tête ===== */
 function dateLine(){const d=new Date();let s=new Intl.DateTimeFormat('fr-FR',{weekday:'long',day:'numeric',month:'long'}).format(d);$('#today').textContent=s.charAt(0).toUpperCase()+s.slice(1);}
@@ -591,7 +677,7 @@ zonesEl.addEventListener('pointerdown',e=>{
 function nWords(s,n){const p=String(s).trim().split(/\s+/);return p.length<=n?s:p.slice(0,n).join(' ');}
 
 function sync(){
-  const live=S.tasks.filter(t=>!t.done);
+  const live=S.tasks.filter(t=>!t.done&&!t.pending);
   cards.forEach((c,id)=>{if(!live.some(t=>t.id===id)){c.el.classList.add('gone');setTimeout(()=>c.el.remove(),700);cards.delete(id);}});
   live.forEach(t=>{
     let c=cards.get(t.id);
@@ -609,7 +695,7 @@ function sync(){
 
 /* positions cibles par tâche */
 function targets(){
-  const live=S.tasks.filter(t=>!t.done);
+  const live=S.tasks.filter(t=>!t.done&&!t.pending);
   const byLv=[[],[],[]];live.forEach(t=>byLv[t.level].push(t));
   // Focus > 4 : le surplus visuel bascule en anneau À venir
   const extra=byLv[0].slice(MAX_FOCUS);byLv[0]=byLv[0].slice(0,MAX_FOCUS);byLv[1]=extra.concat(byLv[1]);
@@ -726,7 +812,7 @@ $('#listBtn').onclick=openList;$('#listGrab').onclick=closeList;$('#listPanel .v
 $('#signout').onclick=signOut;
 $$('#listSeg button').forEach(b=>b.onclick=()=>{S.listType=b.dataset.t;$$('#listSeg button').forEach(x=>x.classList.toggle('on',x===b));renderList();});
 function renderList(){
-  const done=S.listType==='done',src=S.tasks.filter(t=>!!t.done===done);
+  const done=S.listType==='done',src=S.tasks.filter(t=>!t.pending&&!!t.done===done);
   if(!src.length){listEl.innerHTML=`<p class="empty">${done?'Rien de terminé pour l\u2019instant.<br>Ça viendra, sans se presser.':'Tout est vide.<br>C\u2019est un bon début.'}</p>`;return;}
   const rowH=t=>`<div class="row ${t.done?'done':''}" data-id="${t.id}"><div class="check ${t.done?'on':''}">${tick()}</div><div><div class="rt">${esc(nWords(t.title||'Sans titre',8))}</div>${t.note?`<div class="rn">${esc(t.note)}</div>`:''}</div></div>`;
   if(done){listEl.innerHTML='<div class="group">'+src.map(rowH).join('')+'</div>';}
@@ -743,7 +829,10 @@ const sheet=$('#sheet'),sTitle=$('#sTitle'),sNote=$('#sNote'),sDesc=$('#sDesc'),
 const grow=el=>{el.style.height='auto';el.style.height=el.scrollHeight+'px';};
 [sTitle,sNote,sDesc].forEach(el=>el.addEventListener('input',()=>grow(el)));
 function cur(){return S.tasks.find(t=>t.id===S.open);}
-function openSheet(id){const t=S.tasks.find(t=>t.id===id);if(!t)return;S.open=id;S.creating=false;
+function openSheet(id){const t=S.tasks.find(t=>t.id===id);if(!t)return;S.open=id;
+  const pending=!!t.pending;
+  $('#actNew').hidden=!pending;$('#actEdit').hidden=pending;
+  $('#sNote2').textContent='';$('#sNote2').classList.remove('on');
   sTitle.value=t.title;sNote.value=t.note;sDesc.value=t.desc;sDate.value=t.date;sTime.value=t.time;
   sRem.classList.toggle('on',!!t.remind);
   $$('#sSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.lv===t.level));
@@ -751,8 +840,8 @@ function openSheet(id){const t=S.tasks.find(t=>t.id===id);if(!t)return;S.open=id
   $('#sDone').textContent=t.done?'Remettre en cours':'Marquer comme terminée';
   renderChecks();sheet.classList.add('on');requestAnimationFrame(()=>[sTitle,sNote,sDesc].forEach(grow));}
 function closeSheet(){const t=cur();
-  if(S.creating&&t&&!t.title.trim()&&!t.note.trim()&&!t.desc.trim())S.tasks=S.tasks.filter(x=>x.id!==t.id);
-  sheet.classList.remove('on');S.open=null;S.creating=false;sync();save();}
+  if(t&&t.pending)S.tasks=S.tasks.filter(x=>x.id!==t.id);   // jamais ajoutée sans confirmation
+  sheet.classList.remove('on');S.open=null;sync();save();}
 $('#grab').onclick=closeSheet;$('#sheet .veil').onclick=closeSheet;
 addEventListener('keydown',e=>{if(e.key==='Escape'){if(S.open)closeSheet();else if(listPanel.classList.contains('on'))closeList();}});
 function bind(el,f,ev='input'){el.addEventListener(ev,()=>{const t=cur();if(!t)return;t[f]=el.value;t.touched=Date.now();save();});}
@@ -769,17 +858,43 @@ function renderChecks(){const t=cur();if(!t)return;
     $('input',row).addEventListener('input',e=>{cur().list[i].txt=e.target.value;save();});});}
 sNew.addEventListener('keydown',e=>{if(e.key!=='Enter'||!sNew.value.trim())return;cur().list.push({txt:sNew.value.trim(),done:false});sNew.value='';renderChecks();save();sNew.focus();});
 $('#sDone').onclick=()=>{const t=cur();if(!t)return;toggleDone(t.id);closeSheet();};
-$('#sDel').onclick=()=>{const t=cur();if(!t)return;S.tasks=S.tasks.filter(x=>x.id!==t.id);closeSheet();};
-$('#addBtn').onclick=()=>{const t={id:uid(),title:'',note:'',desc:'',date:'',time:'',remind:false,list:[],cat:'',level:S.active,done:false,touched:Date.now()};
-  S.tasks.push(t);sync();save();openSheet(t.id);S.creating=true;setTimeout(()=>sTitle.focus(),420);};
+$('#sDel').onclick=()=>{const t=cur();if(!t)return;const id=t.id,was=!!t.pending;
+  S.tasks=S.tasks.filter(x=>x.id!==id);sheet.classList.remove('on');S.open=null;sync();save();
+  if(!was){removeRemote(id);toast('Supprimée');}};
+$('#addBtn').onclick=()=>{
+  const t={id:newId(),title:'',note:'',desc:'',date:'',time:'',remind:false,list:[],cat:'',
+           level:S.active,done:false,touched:Date.now(),pending:true};
+  S.tasks.push(t);openSheet(t.id);setTimeout(()=>sTitle.focus(),420);
+};
+function flag(msg){const n=$('#sNote2');n.textContent=msg;n.classList.toggle('on',!!msg);}
+$('#sAdd').onclick=()=>{
+  const t=cur();if(!t)return;
+  if(!t.title.trim())return flag('Donne-lui un titre, même court.');
+  delete t.pending;t.touched=Date.now();
+  setActive(t.level);save();pushAll();
+  sheet.classList.remove('on');S.open=null;sync();
+  toast('Tâche ajoutée');
+};
+$('#sCancel').onclick=closeSheet;
+$('#sSave').onclick=()=>{const t=cur();if(!t)return;t.touched=Date.now();save();pushAll();closeSheet();toast('Enregistré');};
 
 /* ===== démarrage ===== */
-function boot(){dateLine();weather();measure();setActive(0);sync();requestAnimationFrame(frame);
+function boot(){booted=true;dateLine();weather();measure();setActive(0);sync();requestAnimationFrame(frame);
   addEventListener('resize',()=>{measure();sync();});}
-(function start(){setMode('in');iMail.value='demo@orbite.app';iPass.value='demo';
+
+(function start(){
+  setMode('in');
+  if(!sb){
+    const w=$('#cfgWarn');w.hidden=false;
+    w.innerHTML='Base non configurée. Renseigne <b>url</b> et <b>anonKey</b> dans le bloc '+
+                '<b>ORBITE_CONFIG</b> en haut du fichier, puis redéploie.';
+  }
   setTimeout(()=>{if(!S.user)show('auth');},1500);
-  store.get(key('session')).then(async sess=>{if(!sess||S.user)return;const u=await store.get(key('user_'+sess));if(!u||S.user)return;
-    S.user=u;S.tasks=(await store.get(key('tasks_'+u.mail)))||seed();greet(u);show('intro');setTimeout(()=>{show('app');boot();},4300);}).catch(()=>{});
+  if(sb){
+    sb.auth.getSession().then(({data})=>{
+      if(data&&data.session&&data.session.user&&!S.user)enter(data.session.user);
+    }).catch(()=>{});
+  }
 })();
 
 })();
