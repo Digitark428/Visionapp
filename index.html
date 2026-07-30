@@ -127,42 +127,17 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
 
 #stage{position:relative;flex:1 1 auto;overflow:hidden;touch-action:none;z-index:1}
 
-/* ---------- zones : trois surfaces cliquables ---------- */
+/* ---------- zones : surfaces cliquables invisibles ---------- */
 #zones{position:absolute;inset:0;z-index:2;pointer-events:none}
 .zone{position:absolute;pointer-events:auto;cursor:pointer;
-  border:1px solid rgba(51,55,47,.07);
-  background:rgba(255,255,255,.10);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
-  transition:background .7s var(--ease),border-color .7s var(--ease),
-             box-shadow .7s var(--ease),transform .7s var(--slow)}
+  background:transparent;border:0;box-shadow:none;
+  transition:background .8s var(--ease)}
 .zone.oval{border-radius:50%}
 .zone.band{border-radius:34px}
-
-/* survol / appui : la zone entière réagit */
+/* seul indice, sur pointeur fin : un souffle de lumière au survol */
 @media (hover:hover){
-  .zone:hover{background:rgba(255,255,255,.30);border-color:rgba(51,55,47,.16)}
-  .zone:hover .zlabel{color:var(--ink);background:rgba(255,255,255,.85)}
+  .zone:hover{background:rgba(255,255,255,.075)}
 }
-.zone:active{background:rgba(255,255,255,.38)}
-
-/* zone active : le niveau où l'on travaille */
-.zone.act{background:rgba(255,255,255,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 2px 20px rgba(51,55,47,.05)}
-.zone.act[data-lv="0"]{border-color:rgba(126,154,118,.42)}
-.zone.act[data-lv="1"]{border-color:rgba(224,162,120,.42)}
-.zone.act[data-lv="2"]{border-color:rgba(150,163,188,.42)}
-
-/* étiquette toujours lisible, posée sur la bordure */
-.zlabel{position:absolute;display:flex;align-items:center;gap:7px;white-space:nowrap;
-  padding:6px 13px;border-radius:999px;font-size:10.5px;letter-spacing:.14em;
-  text-transform:uppercase;font-weight:600;color:var(--muted);
-  background:rgba(255,255,255,.62);border:1px solid rgba(51,55,47,.06);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  box-shadow:0 2px 8px rgba(51,55,47,.06);
-  transition:color .6s var(--ease),background .6s var(--ease)}
-.zlabel i{width:7px;height:7px;border-radius:50%;display:block;flex:0 0 auto}
-.zone.act .zlabel{color:var(--ink);background:rgba(255,255,255,.9)}
-.zone.oval .zlabel{top:0;left:50%;transform:translate(-50%,-50%)}
-.zone.band .zlabel{top:-13px;left:20px}
 
 /* ---------- capsules · verre poli ---------- */
 .card{position:absolute;left:0;top:0;will-change:transform;
@@ -581,7 +556,7 @@ function buildZones(){
     for(let lv=0;lv<3;lv++){
       const d=document.createElement('div');
       d.className='zone';d.dataset.lv=lv;
-      d.innerHTML=`<span class="zlabel"><i style="background:${ZMETA[lv][1]}"></i>${ZMETA[lv][0]}</span>`;
+      d.setAttribute('aria-label',ZMETA[lv][0]);
       zonesEl.appendChild(d);zones.push(d);
     }
   }
