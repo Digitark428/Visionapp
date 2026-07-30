@@ -127,12 +127,42 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
 
 #stage{position:relative;flex:1 1 auto;overflow:hidden;touch-action:none;z-index:1}
 
-/* labels d'anneau (mobile) */
-.blabel{position:absolute;left:22px;display:flex;align-items:center;gap:8px;
-  font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
-  font-weight:600;pointer-events:auto;opacity:.85;transition:opacity .6s var(--ease),color .6s;z-index:2}
-.blabel i{width:7px;height:7px;border-radius:50%;display:block}
-.blabel.act{color:var(--ink)}
+/* ---------- zones : trois surfaces cliquables ---------- */
+#zones{position:absolute;inset:0;z-index:2;pointer-events:none}
+.zone{position:absolute;pointer-events:auto;cursor:pointer;
+  border:1px solid rgba(51,55,47,.07);
+  background:rgba(255,255,255,.10);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+  transition:background .7s var(--ease),border-color .7s var(--ease),
+             box-shadow .7s var(--ease),transform .7s var(--slow)}
+.zone.oval{border-radius:50%}
+.zone.band{border-radius:34px}
+
+/* survol / appui : la zone entière réagit */
+@media (hover:hover){
+  .zone:hover{background:rgba(255,255,255,.30);border-color:rgba(51,55,47,.16)}
+  .zone:hover .zlabel{color:var(--ink);background:rgba(255,255,255,.85)}
+}
+.zone:active{background:rgba(255,255,255,.38)}
+
+/* zone active : le niveau où l'on travaille */
+.zone.act{background:rgba(255,255,255,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 2px 20px rgba(51,55,47,.05)}
+.zone.act[data-lv="0"]{border-color:rgba(126,154,118,.42)}
+.zone.act[data-lv="1"]{border-color:rgba(224,162,120,.42)}
+.zone.act[data-lv="2"]{border-color:rgba(150,163,188,.42)}
+
+/* étiquette toujours lisible, posée sur la bordure */
+.zlabel{position:absolute;display:flex;align-items:center;gap:7px;white-space:nowrap;
+  padding:6px 13px;border-radius:999px;font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;font-weight:600;color:var(--muted);
+  background:rgba(255,255,255,.62);border:1px solid rgba(51,55,47,.06);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:0 2px 8px rgba(51,55,47,.06);
+  transition:color .6s var(--ease),background .6s var(--ease)}
+.zlabel i{width:7px;height:7px;border-radius:50%;display:block;flex:0 0 auto}
+.zone.act .zlabel{color:var(--ink);background:rgba(255,255,255,.9)}
+.zone.oval .zlabel{top:0;left:50%;transform:translate(-50%,-50%)}
+.zone.band .zlabel{top:-13px;left:20px}
 
 /* ---------- capsules · verre poli ---------- */
 .card{position:absolute;left:0;top:0;will-change:transform;
@@ -366,10 +396,7 @@ header{padding:calc(env(safe-area-inset-top) + 22px) 22px 6px;
     </div>
   </header>
   <div id="stage">
-    <svg id="rings"></svg>
-    <div class="blabel" data-lv="0"><i style="background:var(--focus)"></i>Focus</div>
-    <div class="blabel" data-lv="1"><i style="background:var(--soon)"></i>À venir</div>
-    <div class="blabel" data-lv="2"><i style="background:var(--later)"></i>Plus tard</div>
+    <div id="zones"></div>
     <nav class="dock">
       <button class="tab on" data-lv="0"><i></i>Focus</button>
       <button class="tab" data-lv="1"><i></i>À venir</button>
@@ -523,7 +550,7 @@ function weather(){const el=$('#weather');const fb=()=>{el.textContent='26°C  �
   }catch(e){clearTimeout(to);fb();}},()=>{clearTimeout(to);fb();},{timeout:3500,maximumAge:9e5});}
 
 /* ===== scène ===== */
-const stage=$('#stage'),labels=$$('.blabel'),ringsSvg=$('#rings');
+const stage=$('#stage'),zonesEl=$('#zones');
 const cards=new Map();
 let W=0,H=0,cx=0,cy=0,usable=0,colMode=true;
 let a1=0,a2=0,last=0,drag=null,bands=[];
@@ -531,16 +558,11 @@ let a1=0,a2=0,last=0,drag=null,bands=[];
 function tick(){return '<svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2L8 3" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';}
 function measure(){
   W=stage.clientWidth;H=stage.clientHeight;usable=H-70;cx=W/2;cy=usable/2+2;colMode=W<600;
-  positionLabels();buildRings();
-}
-function positionLabels(){
-  if(colMode){bands=computeBands();labels.forEach(l=>{const lv=+l.dataset.lv,b=bands[lv];
-    l.style.display='flex';l.style.top=(b.y0+9)+'px';l.classList.toggle('act',lv===S.active);});}
-  else{labels.forEach(l=>l.style.display='none');}
+  buildZones();
 }
 function computeBands(){
-  const top=8,bot=usable-4,H2=bot-top,gap=20;
-  const w=[S.active===0?.5:.24,S.active===1?.5:.24,S.active===2?.5:.24];
+  const top=10,bot=usable-6,H2=bot-top,gap=22;
+  const w=[S.active===0?.46:.27,S.active===1?.46:.27,S.active===2?.46:.27];
   const sum=w[0]+w[1]+w[2],avail=H2-2*gap;
   let y=top,out=[];for(let i=0;i<3;i++){const h=avail*w[i]/sum;out.push({y0:y,y1:y+h,cy:y+h/2,h});y+=h+gap;}
   return out;
@@ -551,31 +573,44 @@ function orbitGeom(){
   return {fw,fh,outRx,outRy,midRx:outRx*.6,midRy:outRy*.56};
 }
 
-/* repère visuel fin + zone de clic généreuse sur toute la circonférence */
-function buildRings(){
-  const P=[];
-  const stroke=lv=>`rgba(51,55,47,${lv===S.active?.15:.055})`;
+/* --------- trois surfaces cliquables : toute la zone entre dans le niveau --------- */
+const ZMETA=[['Focus','var(--focus)'],['À venir','var(--soon)'],['Plus tard','var(--later)']];
+let zones=[];
+function buildZones(){
+  if(!zones.length){
+    for(let lv=0;lv<3;lv++){
+      const d=document.createElement('div');
+      d.className='zone';d.dataset.lv=lv;
+      d.innerHTML=`<span class="zlabel"><i style="background:${ZMETA[lv][1]}"></i>${ZMETA[lv][0]}</span>`;
+      zonesEl.appendChild(d);zones.push(d);
+    }
+  }
   if(colMode){
     bands=computeBands();
-    bands.forEach((b,lv)=>{
-      P.push(`<line class="vis" x1="20" y1="${b.y0.toFixed(1)}" x2="${W-20}" y2="${b.y0.toFixed(1)}" stroke="${stroke(lv)}" stroke-width="1"/>`);
-      P.push(`<rect class="hitZone" data-lv="${lv}" x="0" y="${b.y0.toFixed(1)}" width="${W}" height="${b.h.toFixed(1)}" fill="transparent"/>`);
+    zones.forEach((d,lv)=>{const b=bands[lv];
+      d.className='zone band'+(lv===S.active?' act':'');
+      d.style.left='10px';d.style.width=(W-20)+'px';
+      d.style.top=b.y0+'px';d.style.height=b.h+'px';
+      d.style.zIndex=2+lv;                       // bandes disjointes : ordre indifférent
     });
   }else{
     const g=orbitGeom();
-    [[2,g.outRx,g.outRy],[1,g.midRx,g.midRy]].forEach(([lv,rx,ry])=>{
-      P.push(`<ellipse class="vis" cx="${cx}" cy="${cy}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="none" stroke="${stroke(lv)}" stroke-width="1"/>`);
-      P.push(`<ellipse class="hitRing" data-lv="${lv}" cx="${cx}" cy="${cy}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="none" stroke="transparent" stroke-width="64"/>`);
+    const R=[
+      {rx:(g.fw+8+g.midRx)/2,  ry:(g.fh+8+g.midRy)/2},
+      {rx:(g.midRx+g.outRx)/2, ry:(g.midRy+g.outRy)/2},
+      {rx:g.outRx+80,          ry:g.outRy+56}
+    ];
+    zones.forEach((d,lv)=>{const r=R[lv];
+      d.className='zone oval'+(lv===S.active?' act':'');
+      d.style.left=(cx-r.rx)+'px';d.style.top=(cy-r.ry)+'px';
+      d.style.width=(r.rx*2)+'px';d.style.height=(r.ry*2)+'px';
+      d.style.zIndex=4-lv;                       // ellipses imbriquées : la plus petite au-dessus
     });
-    const rx0=g.fw+34, ry0=g.fh+38;
-    P.push(`<ellipse class="vis" cx="${cx}" cy="${cy}" rx="${rx0}" ry="${ry0}" fill="none" stroke="${stroke(0)}" stroke-width="1"/>`);
-    P.push(`<ellipse class="hitZone" data-lv="0" cx="${cx}" cy="${cy}" rx="${rx0}" ry="${ry0}" fill="transparent"/>`);
   }
-  ringsSvg.innerHTML=P.join('');
 }
-ringsSvg.addEventListener('pointerdown',e=>{
-  const lv=e.target.getAttribute&&e.target.getAttribute('data-lv');
-  if(lv!==null&&lv!==undefined&&lv!=='')setActive(+lv);
+zonesEl.addEventListener('pointerdown',e=>{
+  const z=e.target.closest('.zone');
+  if(z)setActive(+z.dataset.lv);
 });
 
 function nWords(s,n){const p=String(s).trim().split(/\s+/);return p.length<=n?s:p.slice(0,n).join(' ');}
@@ -663,7 +698,7 @@ function frame(ts){
     c.el.style.filter=g.blur?`blur(${g.blur}px)`:'';
     c.el.style.opacity=c.el.classList.contains('gone')?'0':g.op;
     c.el.style.zIndex=g.z;
-    c.el.style.pointerEvents=g.act?'':'none';   // les capsules inactives laissent passer le clic vers l'anneau
+    c.el.style.pointerEvents='';
   });
   requestAnimationFrame(frame);
 }
@@ -672,15 +707,15 @@ function frame(ts){
 function setActive(lv){
   S.active=lv;
   $$('.tab').forEach(b=>b.classList.toggle('on',+b.dataset.lv===lv));
-  positionLabels();buildRings();sync();
+  buildZones();sync();
 }
 $$('.tab').forEach(b=>b.onclick=()=>setActive(+b.dataset.lv));
-labels.forEach(l=>l.onclick=()=>setActive(+l.dataset.lv));
 
 /* ===== déplacement d'une capsule ===== */
 function hookDrag(el,id){
   el.addEventListener('pointerdown',e=>{
-    const t=S.tasks.find(t=>t.id===id);if(!t||t.level!==S.active)return; // seul l'anneau actif est interactif
+    const t=S.tasks.find(t=>t.id===id);if(!t)return;
+    if(t.level!==S.active){setActive(t.level);return;}   // toucher une capsule inactive entre dans son niveau
     const c=cards.get(id);if(!c)return;el.setPointerCapture(e.pointerId);
     drag={id,el,t0:Date.now(),sx:e.clientX,sy:e.clientY,ox:e.clientX-c.x,oy:e.clientY-c.y,moved:false};
     el.classList.add('held');
